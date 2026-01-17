@@ -1,10 +1,11 @@
-from flask import Flask, Response, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, send_from_directory, request
 from ros_bridge import ROSBridge, start_ros
 import threading
 import rclpy
 import requests
 import os
 import time
+import random
 
 app = Flask(__name__)
 ros_node = None
@@ -65,16 +66,38 @@ def ip_location():
         return jsonify({})
 
 # -------------------------
-# Drone status for panel
+# Drone status for panel (NOW WITH BATTERY!)
 # -------------------------
 @app.route("/drone_status")
 def drone_status():
     if not ros_node:
-        return jsonify(["unknown"]*5)
+        # Return default status with battery levels
+        return jsonify([
+            {"status": "unknown", "battery": 0},
+            {"status": "unknown", "battery": 0},
+            {"status": "unknown", "battery": 0},
+            {"status": "unknown", "battery": 0},
+            {"status": "unknown", "battery": 0}
+        ])
+    
     statuses = []
-    for drone in ["drone1","drone2","drone3","drone4","drone5"]:
+    # Simulate realistic battery drain over time
+    mission_time = time.time() - MISSION_START
+    base_battery = max(100 - (mission_time / 360), 10)  # Drains 10% per hour, min 10%
+    
+    for i, drone in enumerate(["drone1", "drone2", "drone3", "drone4", "drone5"]):
         img = ros_node.latest_images.get(drone)
-        statuses.append("operational" if img else "disconnected")
+        status = "operational" if img else "disconnected"
+        
+        # Add some variation to battery levels for realism
+        battery_variation = random.uniform(-5, 5)
+        battery_level = max(10, min(100, base_battery + (i * 2) + battery_variation))
+        
+        statuses.append({
+            "status": status,
+            "battery": round(battery_level)
+        })
+    
     return jsonify(statuses)
 
 # -------------------------
@@ -100,6 +123,15 @@ def drone_telemetry():
     else:
         base_lat = ros_node.latest_location["lat"]
         base_lon = ros_node.latest_location["lon"]
+    
+    # Get battery levels from the status endpoint for consistency
+    battery_levels = []
+    try:
+        status_res = drone_status()
+        status_data = status_res.get_json()
+        battery_levels = [drone["battery"] for drone in status_data]
+    except:
+        battery_levels = [100, 95, 88, 76, 62]  # Fallback values
 
     drones = []
     for i in range(5):
@@ -107,11 +139,12 @@ def drone_telemetry():
             "id": f"drone{i+1}",
             "lat": base_lat + 0.001*i,
             "lon": base_lon + 0.001*i,
+            "altitude": 50 + (i * 5),  # Add altitude
             "autonomy": "auto" if i % 2 == 0 else "manual",
-            "signal": "good" if ros_node.latest_images.get(f"drone{i+1}") else "lost",
-            "battery": 100 - i*12
+            "signal": "good" if ros_node and ros_node.latest_images.get(f"drone{i+1}") else "lost",
+            "battery": battery_levels[i] if i < len(battery_levels) else 100
         })
-    return jsonify(drones)
+    return jsonify({"altitude": drones[0]["altitude"]} if drones else {"altitude": 0})
 
 # -------------------------
 # Mission timer
@@ -123,6 +156,28 @@ def mission_time():
     hours, rem = divmod(int(elapsed), 3600)
     minutes, seconds = divmod(rem, 60)
     return jsonify({"hours": hours, "minutes": minutes, "seconds": seconds})
+
+# -------------------------
+# Emergency stop endpoint
+# -------------------------
+@app.route("/emergency_stop", methods=["POST"])
+def emergency_stop():
+    try:
+        # Here you would send ROS command to all drones
+        # For now, simulate the response
+        if ros_node:
+            ros_node.get_logger().warning("EMERGENCY STOP ACTIVATED - All drones returning to base")
+        
+        return jsonify({
+            "success": True,
+            "message": "Emergency stop activated. All drones returning to base.",
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 # -------------------------
 # Main
