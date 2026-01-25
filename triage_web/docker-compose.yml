@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  triage_ui:
+    build: .
+    network_mode: host
+    ipc: host
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/etc/fastdds/fastdds.xml
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - ./docker_dds/fastdds_no_shm.xml:/etc/fastdds/fastdds.xml:ro
+    command: python3 /app/backend/app.py
